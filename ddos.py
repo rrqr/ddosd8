@@ -77,7 +77,7 @@ def calculate_speed():
         print(f"سرعة النقل: {speed:.2f} MB/s")
 
 # إنشاء البوت باستخدام التوكن الخاص بك
-TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'
 bot = telebot.TeleBot(TOKEN)
 
 # تحقق من صحة المالك
