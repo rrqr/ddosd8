@@ -1,4 +1,4 @@
 git+https://github.com/eternnoir/pyTelegramBotAPI.git
 python-telegram-bot
 aiohttp
-aiogram --upgrade
+aiogram==2.15
