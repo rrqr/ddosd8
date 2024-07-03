@@ -33,7 +33,7 @@ lock = threading.Lock()
 stop_attack_event = threading.Event()
 
 # قراءة ربما قائمة معينة من المستخدمين
-Owner = []
+Owner = ['6358035274']
 NormalUsers = []
 
 def read_users():
