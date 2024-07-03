@@ -84,8 +84,7 @@ def calculate_speed():
         logging.info(f"سرعة النقل: {speed:.2f} MB/s")
 
 # يجب تعيين التوكن بشكل مباشر
-TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4
-'  # هنا يجب أن تضع توكن البوت الخاص بك
+TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'  # هنا يجب أن تضع توكن البوت الخاص بك
 if not TOKEN:
     logging.error("Bot token is not defined")
     raise Exception('Bot token is not defined')
