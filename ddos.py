@@ -168,6 +168,3 @@ def process_start_attack(message):
 def main():
     """تشغيل البوت"""
     bot.polling()
-
-if name == 'main':
-    main()
