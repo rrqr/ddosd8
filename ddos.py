@@ -131,7 +131,6 @@ def process_add_user(message):
             logging.error(f"خطأ أثناء إضافة المستخدم: {e}")
     else:
         bot.reply_to(message، "المستخدم موجود بالفعل في القائمة أو معرف المستخدم غير صحيح.")
-
 def process_remove_user(message):
     """إزالة مستخدم من القائمة"""
     user_id = message.text.strip()
