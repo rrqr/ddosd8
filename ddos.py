@@ -7,6 +7,7 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
 import asyncio
+import os
 
 # إعداد السجلات مع مستوى تصحيح أكثر تفصيلاً
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -15,18 +16,29 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 Owner = ['6358035274']
 NormalUsers = []
 
+def ensure_file_exists(filename):
+    """تأكد من وجود الملف، وإنشائه إذا لم يكن موجودًا"""
+    if not os.path.exists(filename):
+        with open(filename, 'w') as file:
+            pass  # فقط إنشاء الملف الفارغ
+
 def read_users():
+    ensure_file_exists('owners.txt')
+    ensure_file_exists('normal_users.txt')
+
     try:
         with open('owners.txt', 'r') as file:
             Owner.extend(file.read().splitlines())
-    except FileNotFoundError:
-        logging.warning("لم يتم العثور على ملف مالكي البوت.")
-
+        logging.info("تم تحميل قائمة المالكين بنجاح.")
+    except Exception as e:
+        logging.error(f"حدث خطأ أثناء قراءة owners.txt: {e}")
+        
     try:
         with open('normal_users.txt', 'r') as file:
             NormalUsers.extend(file.read().splitlines())
-    except FileNotFoundError:
-        logging.warning("لم يتم العثور على ملف مستخدمي البوت.")
+        logging.info("تم تحميل قائمة المستخدمين بنجاح.")
+    except Exception as e:
+        logging.error(f"حدث خطأ أثناء قراءة normal_users.txt: {e}")
 
 read_users()
 
